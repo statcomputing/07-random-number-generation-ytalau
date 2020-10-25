@@ -1,0 +1,176 @@
+---
+title: "hw7"
+author: "Yuen Tsz Abby Lau"
+date: "10/24/2020"
+output: pdf_document
+---
+
+## 5.3.1
+
+### finding the normalizing constant $C$
+
+Note that the density function for the Gamma distribution is the following,
+$$
+f(x)=\frac{1}{\Gamma(\alpha)\beta^\alpha}x^{\alpha-1}e^{-x/\beta}
+$$
+
+Let $\alpha = \theta$ and $\beta = 1$, we'll have,
+
+$$\frac{1}{\Gamma(\theta)}\int_0^\infty x^{\theta-1}e^{-x} \mathrm{d}x= 1$$
+Similarly, if we let $\alpha = \theta + 1/2$ and $\beta = 1$, then
+
+$$\frac{1}{\Gamma(\theta + 1/2)}\int_0^\infty x^{\theta-1/2}e^{-x} \mathrm{d}x = 1$$
+
+We then can separate $g$ into two parts such that,
+
+\begin{equation} 
+\begin{split}
+C\int_0^\infty (2x^{\theta-1} + x^{\theta-1/2})e^{-x}\mathrm{d}x = 
+2C\int_0^\infty x^{\theta-1}e^{-x}\mathrm{d}x + C\int_0^\infty 
+x^{\theta-1/2}e^{-x}\mathrm{d}x  \\
+ = \frac{2C\Gamma(\theta)}{\Gamma(\theta)}\int_0^\infty 
+ x^{\theta-1}e^{-x}\mathrm{d}x +
+ \frac{C\Gamma(\theta + 1/2)}{\Gamma(\theta + 1/2)}\int_0^\infty 
+x^{\theta-1/2}e^{-x}\mathrm{d}x \\
+= 2C\Gamma(\theta) + C\Gamma(\theta + 1/2) = [2\Gamma(\theta) + 
+\Gamma(\theta + 1/2)]C = 1
+\end{split}
+\end{equation} 
+
+Thus $C = \frac{1}{2\Gamma(\theta) + 
+\Gamma(\theta + 1/2)}$.
+
+Also from (1) we can tell $g$ is a mixture of two Gamma distributions. The first
+Gamma distribution has $\alpha_1 = \theta$, $\beta_1 = 1$, and weight 
+$w_1 = \frac{2\Gamma(\theta)}{2\Gamma(\theta) + 
+\Gamma(\theta + 1/2)}$.  The second Gamma distribution has 
+$\alpha_2 = \theta + 1/2$, $\beta_2 = 1$, and weight 
+$w_2 = \frac{\Gamma(\theta + 1/2)}{2\Gamma(\theta) + 
+\Gamma(\theta + 1/2)}$.
+
+## pseudo-code
+
+1. with a given $\theta$, determine $w_1$
+2. generate a random sample $z$ from the standard uniform distribution
+3. if $z < w_1$, we generate a random sample from the first Gamma 
+distribution with $\alpha_1 = \theta$ and $\beta_1 = 1$; otherwise we generate 
+a random sample from the second Gamma distribution has 
+$\alpha_2 = \theta + 1/2$ and $\beta_2 = 1$.
+
+
+```{r}
+rmgamma <- function(theta, n) {
+    w1 <- 2*gamma(theta)/(2*gamma(theta) + gamma(theta + 0.5))
+    z <- runif(n) < w1
+    z <- sapply(1:n, function(x) ifelse(z[x], rgamma(1, shape = theta), 
+                rgamma(1, shape = theta + 0.5)))
+    return(z)
+    
+}
+
+set.seed(326)
+rsamples <- rmgamma(theta = 2, n = 10000)
+true_dist <- function(x, theta = 2) {
+    w1 <- 2*gamma(theta)/(2*gamma(theta) + gamma(theta + 0.5))
+    (1-w1)*dgamma(x, shape = theta + 0.5) + w1*dgamma(x, shape = theta)
+}
+plot(density(rsamples),
+     main = "Density Estimate of the Mixture Model")
+curve(true_dist, from = -0.05, to = 12, add = T, col = "green")
+legend("topright", 
+  legend = c("theta = 2"))
+```
+
+
+## rejection sampling
+
+Know that $g$ and $f$ has the sample support.  Also, ignoring the normalizing 
+constants for each distribution, we see that 
+$\frac{f(x)}{g(x)} = \frac{\sqrt{x + 4}}{2 + \sqrt{x}} \leq 1$
+
+1. generate $y$ from g
+2. generate $u$ from a standard uniform distribution
+3. if $u \leq f(y)/[Mg(y)]$, output y = x; otherwise, return to step 1
+
+In this case, $M$ = 1.
+
+```{r}
+ratio <- function(x) {
+    sqrt(4 + x)/(2 + sqrt(x))
+}
+
+rej_sample <- function(M, n, theta) { 
+    M <- M/(2*gamma(theta) + gamma(theta + 0.5))
+    n.accepts <- 0
+    res <- rep(NA, n)
+    while (n.accepts < n) {
+        y <- rmgamma(n = 1, theta = theta)
+        u <- runif(1) 
+        if (u < ratio(y)/M) {
+            n.accepts <- n.accepts + 1
+            res[n.accepts] <- y
+        }
+    }
+    
+    res
+}
+
+rsamples2 <- rej_sample(M = 1, n = 10000, theta = 2)
+true_dist2 <- function(x, theta = 2) {
+    sqrt(x + 4) * exp(-x) * x^(theta - 1)
+}
+
+plot(density(rsamples2),
+     main = "Density Estimate of the Mixture Model",
+     ylim = c(0, 1))
+curve(true_dist2, from = 0, to = 12, add = T, col = "green")
+
+
+```
+
+### 6.3.1
+
+
+```{r}
+### generate r mixture normal
+rmnromal <-  function(n, pi, mu, sd) {
+    z <- sample(1:length(pi), prob = pi, size = n,replace = TRUE)
+    x <- rnorm(n,mu[z],s[z])
+  return(x)
+}
+
+update_pi <- function(y) {
+    rbeta(n = 1, mean(y))
+}
+
+update_mu <- function(sig2, y) {
+    n <- length(n)
+    tau <- 1/sig2
+    mu_1 <- sum(y)*tau/(n*tau + 1/10^2)
+    sd_1 <- sqrt(1/(n*tau + 1/10^2))
+    rnorm(n = 1, mean = mu_1, sd = sd_1)
+}
+
+update_sig2 <- function(mu, y) {
+    n <- length(y)
+    alpha <- 0.5 + n/2
+    beta <- 10 + sum((y - mu)^2)
+    sig2_inv <- rgamma(n = 1, shape = alpha, rate = beta)
+    1/sig2_inv
+}
+
+gibbs <- function(y, niter, init) {
+    mu_out <- numeric(niter)
+    sig2_out <- numeric(n_iter)
+    mu_current <- init$mu
+    ## for gibbs sampler
+    for (i in 1:n_iter) {
+        sig2_current <- update_sig2(y = y, mu = mu_current)
+        mu_current <- update_mu(sig2 = sig2_current, y = y)
+        sig2_out[i] <- sig2_current
+        mu_out[i] <- mu_current
+    }
+    cbind(mu = mu_out, sig2 = sig2_out)
+}
+```
+
