@@ -133,44 +133,67 @@ curve(true_dist2, from = 0, to = 12, add = T, col = "green")
 
 ```{r}
 ### generate r mixture normal
-rmnromal <-  function(n, pi, mu, sd) {
-    z <- sample(1:length(pi), prob = pi, size = n,replace = TRUE)
-    x <- rnorm(n,mu[z],s[z])
-  return(x)
+
+update_pi <- function(y, mu, sig2, pi_old) {
+    sum_part <- pi_old * dnorm(y, mu[1], sqrt(sig2[1])) + 
+        (1 - pi_old) * dnorm(y, mu[2], sqrt(sig2[2]))
+    p <- pi_old * dnorm(y, mu[1], sqrt(sig2[1]))/sum_part
+    pi_new <- mean(p)
+    pi_new
 }
 
-update_pi <- function(y) {
-    rbeta(n = 1, mean(y))
+update_z <- function(n, pi) {
+        z <- t(rmultinom(n = n, size = 1, prob = c(pi, 1-pi)))
 }
 
-update_mu <- function(sig2, y) {
-    n <- length(n)
+update_mu <- function(sig2, y, z) {
+    n <- length(y)
     tau <- 1/sig2
-    mu_1 <- sum(y)*tau/(n*tau + 1/10^2)
+    zy <- y * z
+    mu_1 <- colSums(zy)*tau/(n*tau + 1/10^2)
     sd_1 <- sqrt(1/(n*tau + 1/10^2))
-    rnorm(n = 1, mean = mu_1, sd = sd_1)
+    cbind(rnorm(n = 1, mean = mu_1[1], sd = sd_1[1]),
+          rnorm(n = 1, mean = mu_1[2], sd = sd_1[2]))
+          
 }
 
-update_sig2 <- function(mu, y) {
+update_sig2 <- function(mu, y, z) {
     n <- length(y)
     alpha <- 0.5 + n/2
-    beta <- 10 + sum((y - mu)^2)
-    sig2_inv <- rgamma(n = 1, shape = alpha, rate = beta)
-    1/sig2_inv
+    zy <- y * z
+    beta_1 <- 10 + sum((zy[,1] - mu[1])^2)
+    beta_2 <- 10 + sum((zy[,2] - mu[2])^2)
+    sig2_inv_1 <- rgamma(n = 1, shape = alpha, rate = beta_1)
+    sig2_inv_2 <- rgamma(n = 1, shape = alpha, rate = beta_2)
+    cbind(1/sig2_inv_1, 1/sig2_inv_2)
 }
 
 gibbs <- function(y, niter, init) {
-    mu_out <- numeric(niter)
-    sig2_out <- numeric(n_iter)
+    mu_out <- matrix(nrow = 2, ncol = niter)
+    sig2_out <- matrix(nrow = 2, ncol = niter)
+    pi_out <- matrix(nrow = 1, ncol = niter)
     mu_current <- init$mu
+    pi_current <- init$pi
     ## for gibbs sampler
-    for (i in 1:n_iter) {
-        sig2_current <- update_sig2(y = y, mu = mu_current)
-        mu_current <- update_mu(sig2 = sig2_current, y = y)
-        sig2_out[i] <- sig2_current
-        mu_out[i] <- mu_current
+    for (i in 1:niter) {
+        z_current <- update_z(n = length(y), pi = pi_current)
+        sig2_current <- update_sig2(y = y, mu = mu_current, z = z_current)
+        mu_current <- update_mu(sig2 = sig2_current, y = y, z = z_current)
+        pi_current <- update_pi(sig2 = sig2_current, y = y, 
+                                pi_old = pi_current, mu = mu_current)
+        sig2_out[, i] <- sig2_current
+        mu_out[, i] <- mu_current
+        pi_out[, i] <- pi_current
     }
-    cbind(mu = mu_out, sig2 = sig2_out)
+    list(mu = mu_out, sig2 = sig2_out, pi = pi_out)
 }
+
+(mu <- rnorm(2, mean = 0, sd = 10))
+(sig2 <- 1/rgamma(n = 2, shape = 0.5, rate = 10))
+S <- cbind(rnorm(n = 100, mu[1], sqrt(sig2[1])), 
+           rnorm(n = 100, mu[2], sqrt(sig2[2])))
+ind <- t(rmultinom(n = 100, size = 1, prob = c(0.3, 0.6)))
+y <- rowSums(S * ind)
+res <- gibbs(y = y, niter = 1000, init = list(pi = 0.5, mu = c(15, -20)))
 ```
 
